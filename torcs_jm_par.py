@@ -30,26 +30,31 @@ def clip(v,lo,hi):
     else: return v
 
 def bargraph(x,mn,mx,w,c='X'):
-    if not w: return ''
-    if x<mn: x= mn
-    if x>mx: x= mx
-    tx= mx-mn
-    if tx<=0: return 'backwards'
-    upw= tx/float(w)
-    if upw<=0: return 'what?'
+    '''Draws a simple asciiart bar graph. Very handy for
+    visualizing what's going on with the data.
+    x= Value from sensor, mn= minimum plottable value,
+    mx= maximum plottable value, w= width of plot in chars,
+    c= the character to plot with.'''
+    if not w: return '' # No width!
+    if x<mn: x= mn      # Clip to bounds.
+    if x>mx: x= mx      # Clip to bounds.
+    tx= mx-mn # Total real units possible to show on graph.
+    if tx<=0: return 'backwards' # Stupid bounds.
+    upw= tx/float(w) # X Units per output char width.
+    if upw<=0: return 'what?' # Don't let this happen.
     negpu, pospu, negnonpu, posnonpu= 0,0,0,0
-    if mn < 0:
-        if x < 0:
+    if mn < 0: # Then there is a negative part to graph.
+        if x < 0: # And the plot is on the negative side.
             negpu= -x + min(0,mx)
             negnonpu= -mn + x
-        else:
-            negnonpu= -mn + min(0,mx)
-    if mx > 0:
-        if x > 0:
+        else: # Plot is on pos. Neg side is empty.
+            negnonpu= -mn + min(0,mx) # But still show some empty neg.
+    if mx > 0: # There is a positive part to the graph
+        if x > 0: # And the plot is on the positive side.
             pospu= x - max(0,mn)
             posnonpu= mx - x
-        else:
-            posnonpu= mx - max(0,mn)
+        else: # Plot is on neg. Pos side is empty.
+            posnonpu= mx - max(0,mn) # But still show some empty pos.
     nnc= int(negnonpu/upw)*'-'
     npc= int(negpu/upw)*c
     ppc= int(pospu/upw)*c
@@ -62,11 +67,11 @@ class Client():
         self.host= 'localhost'
         self.port= 3001
         self.sid= 'SCR'
-        self.maxEpisodes=1
+        self.maxEpisodes=1 # "Maximum number of learning episodes to perform"
         self.trackname= 'unknown'
-        self.stage= 3
+        self.stage= 3 # 0=Warm-up, 1=Qualifying 2=Race, 3=unknown <Default=3>
         self.debug= False
-        self.maxSteps= 100000
+        self.maxSteps= 100000  # 50steps/second
         self.parse_the_command_line()
         if H: self.host= H
         if p: self.port= p
@@ -88,6 +93,7 @@ class Client():
         self.so.settimeout(1)
         n_fail = 5
         while True:
+            # SENSORS: 19 angles from -45 to +45 degrees
             a= "-45 -19 -12 -7 -4 -2.5 -1.7 -1 -.5 0 .5 1 1.7 2.5 4 7 12 19 45"
             initmsg='%s(init %s)' % (self.sid,a)
             try:
@@ -160,6 +166,7 @@ class Client():
             sys.exit(-1)
 
     def get_servers_input(self):
+        '''Server's input is stored in a ServerState object'''
         if not self.so: return
         sockdata= str()
         while True:
@@ -181,14 +188,14 @@ class Client():
                 print("Server has restarted the race on %d." % self.port)
                 self.shutdown()
                 return
-            elif not sockdata:
-                continue
+            elif not sockdata: # Empty?
+                continue       # Try again.
             else:
                 self.S.parse_server_str(sockdata)
                 if self.debug:
-                    sys.stderr.write("\x1b[2J\x1b[H")
+                    sys.stderr.write("\x1b[2J\x1b[H") # Clear for steady output.
                     print(self.S)
-                break
+                break # Can now return from this function.
 
     def respond_to_server(self):
         if not self.so: return
@@ -208,11 +215,13 @@ class Client():
         self.so = None
 
 class ServerState():
+    '''What the server is reporting right now.'''
     def __init__(self):
         self.servstr= str()
         self.d= dict()
 
     def parse_server_str(self, server_string):
+        '''Parse the server string.'''
         self.servstr= server_string.strip()[:-1]
         sslisted= self.servstr.strip().lstrip('(').rstrip(')').split(')(')
         for i in sslisted:
@@ -223,16 +232,17 @@ class ServerState():
         return self.fancyout()
 
     def fancyout(self):
+        '''Specialty output for useful ServerState monitoring.'''
         out= str()
         sensors= ['stucktimer','fuel','distRaced','distFromStart','opponents','wheelSpinVel',
                   'z','speedZ','speedY','speedX','targetSpeed','rpm','skid','slip','track','trackPos','angle']
         for k in sensors:
-            if type(self.d.get(k)) is list:
-                if k == 'track':
+            if type(self.d.get(k)) is list: # Handle list type data.
+                if k == 'track': # Nice display for track sensors.
                     strout= str()
                     raw_tsens= ['%.1f'%x for x in self.d['track']]
                     strout+= ' '.join(raw_tsens[:9])+'_'+raw_tsens[9]+'_'+' '.join(raw_tsens[10:])
-                elif k == 'opponents':
+                elif k == 'opponents': # Nice display for opponent sensors.
                     strout= str()
                     for osensor in self.d['opponents']:
                         if   osensor >190: oc= '_'
@@ -246,17 +256,28 @@ class ServerState():
                 else:
                     strlist= [str(i) for i in self.d[k]]
                     strout= ', '.join(strlist)
-            else:
+            else: # Not a list type of value.
                 strout= str(self.d[k])
             out+= "%s: %s\n" % (k,strout)
         return out
 
 class DriverAction():
+    '''What the driver is intending to do (i.e. send to the server).
+    Composes something like this for the server:
+    (accel 1)(brake 0)(gear 1)(steer 0)(clutch 0)(focus 0)(meta 0) or
+    (accel 1)(brake 0)(gear 1)(steer 0)(clutch 0)(focus -90 -45 0 45 90)(meta 0)'''
     def __init__(self):
        self.actionstr= str()
        self.d= { 'accel':0.2, 'brake':0, 'clutch':0, 'gear':1, 'steer':0, 'focus':[-90,-45,0,45,90], 'meta':0 }
 
     def clip_to_limits(self):
+        """There pretty much is never a reason to send the server
+        something like (steer 9483.323). This comes up all the time
+        and it's probably just more sensible to always clip it than to
+        worry about when to. The "clip" command is still a snakeoil
+        utility function, but it should be used only for non standard
+        things or non obvious limits (limit the steering to the left,
+        for example). For normal limits, simply don't worry about it."""
         self.d['steer']= clip(self.d['steer'], -1, 1)
         self.d['brake']= clip(self.d['brake'], 0, 1)
         self.d['accel']= clip(self.d['accel'], 0, 1)
@@ -282,6 +303,7 @@ class DriverAction():
         return out
 
     def fancyout(self):
+        '''Specialty output for useful monitoring of bot's effectors.'''
         out= str()
         od= self.d.copy()
         for k in sorted(od):
@@ -290,6 +312,8 @@ class DriverAction():
         return out
 
 def destringify(s):
+    '''makes a string into a value or a list of strings into a list of
+    values (if possible)'''
     if not s: return s
     if type(s) is str:
         try:
@@ -311,7 +335,6 @@ CENTERING_GAIN = 0.15
 BRAKE_THRESHOLD = 0.4
 GEAR_SPEEDS = [0, 20, 40, 80, 100, 180] 
 ENABLE_TRACTION_CONTROL = True 
-
 
 # ================= HELPER FUNCTIONS =================
 def calculate_steering(S):
@@ -353,8 +376,6 @@ def drive_modular(c):
     R['brake'] = apply_brakes(S)
     R['accel'] = traction_control(S, R['accel'])
     R['gear'] = shift_gears(S)
-    
-    
 
 # ================= MAIN LOOP =================
 if __name__ == "__main__":
